@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: whatsapp-render-free
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_URL
+        sync: false
+      - key: APP_TOKEN
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini
+      - key: MONGODB_URI
+        sync: false
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/google-chrome-stable
+      - key: HEADLESS
+        value: "true"
+      - key: REPLY_COOLDOWN_MS
+        value: "6000"
+      - key: IGNORE_GROUPS
+        value: "true"
+      - key: IGNORE_STATUS
+        value: "true"
+      - key: REMOTE_BACKUP_INTERVAL_MS
+        value: "300000"
+      - key: TEMP_AUTH_DIR
+        value: ./tmp-auth
+      - key: HISTORY_LIMIT
+        value: "250"

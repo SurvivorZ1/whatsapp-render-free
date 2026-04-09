@@ -1,0 +1,4 @@
+node_modules
+.env
+tmp-auth
+npm-debug.log*
