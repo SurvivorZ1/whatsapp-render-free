@@ -121,15 +121,21 @@ async function getOrCreateAgent(sessionId) {
 
 async function updateAgent(sessionId, patch) {
   const safeId = sanitizeSessionId(sessionId);
-  const base = {
-    sessionId: safeId,
-    updatedAt: new Date()
+  const defaults = {
+    label: safeId,
+    prompt: BOT_DEFAULT_PROMPT,
+    active: true
   };
-  const set = { ...base, ...patch };
+  const set = {
+    sessionId: safeId,
+    updatedAt: new Date(),
+    ...defaults,
+    ...patch
+  };
   delete set._id;
   return Agent.findOneAndUpdate(
     { sessionId: safeId },
-    { $set: set, $setOnInsert: { createdAt: new Date(), prompt: BOT_DEFAULT_PROMPT, label: safeId, active: true } },
+    { $set: set, $setOnInsert: { createdAt: new Date() } },
     { new: true, upsert: true }
   );
 }
