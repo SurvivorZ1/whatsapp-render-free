@@ -1,33 +1,235 @@
-body{margin:0;font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef}
-.wrap{max-width:1320px;margin:auto;padding:24px}
-.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}
-.grid{display:grid;grid-template-columns:340px 1fr;gap:20px}
-.card{background:#111b21;border:1px solid #2a3942;border-radius:18px;padding:18px;box-shadow:0 10px 24px rgba(0,0,0,.18)}
-h1,h2{margin:0 0 12px}
-.muted{color:#8aa0aa;font-size:14px}
-input,textarea,button{width:100%;box-sizing:border-box;border-radius:14px;border:1px solid #2a3942;background:#202c33;color:#fff;padding:12px;margin:6px 0 12px}
-button{background:#00a884;color:#061511;border:0;font-weight:700;cursor:pointer}
-button.alt{background:#21313a;color:#fff}
-button.danger{background:#3c1717;color:#ffd6d6}
-.list{display:grid;gap:10px}
-.item{padding:12px;border:1px solid #2a3942;border-radius:14px;background:#0d171d;cursor:pointer}
-.item.active{border-color:#00a884}
-.msglog{min-height:300px;max-height:560px;overflow:auto;display:flex;flex-direction:column;gap:10px}
-.bubble{max-width:78%;padding:10px 12px;border-radius:16px;white-space:pre-wrap}
-.in{align-self:flex-start;background:#202c33}
-.out{align-self:flex-end;background:#005c4b}
-.qr{display:none;background:#fff;color:#111;border-radius:14px;padding:14px;text-align:center}
-.qr img{max-width:240px;width:100%}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-.actions{display:flex;gap:10px}
-.actions button{width:auto;min-width:150px}
-.statusbox{background:#0d171d;border:1px solid #2a3942;border-radius:14px;padding:12px;margin-top:12px;font-size:14px}
-.ok{color:#6ee7b7}
-.warn{color:#fbbf24}
-.err{color:#fca5a5}
-@media(max-width:980px){
-  .grid,.row{grid-template-columns:1fr}
-  .top{flex-direction:column;align-items:flex-start}
-  .actions{width:100%}
-  .actions button{flex:1}
+let sessions = [];
+let current = null;
+
+const $ = (id) => document.getElementById(id);
+
+function token() {
+  return localStorage.getItem('APP_TOKEN') || '';
 }
+
+function esc(s) {
+  return String(s || '').replace(/[&<>"']/g, (m) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  }[m]));
+}
+
+async function api(path, method = 'GET', payload = null) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token()}`
+  };
+
+  const res = await fetch(path, {
+    method,
+    headers,
+    body: payload ? JSON.stringify(payload) : null
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Error');
+  return data;
+}
+
+function setQrStatus(text, cls = 'muted') {
+  $('qrStatus').className = 'statusbox ' + cls;
+  $('qrStatus').textContent = text;
+}
+
+async function loadSessions() {
+  sessions = await api('/api/agents');
+  $('sessionList').innerHTML = sessions.length
+    ? sessions.map((s) => `
+      <div class="item ${current === s.sessionId ? 'active' : ''}" data-id="${s.sessionId}">
+        <strong>${esc(s.label || s.sessionId)}</strong><br>
+        <span class="muted">${esc(s.number || s.sessionId)}</span><br>
+        <span class="muted">${esc(s.connected ? 'Conectado' : (s.status || 'Desconectado'))}</span>
+      </div>
+    `).join('')
+    : '<div class="muted">No hay sesiones.</div>';
+
+  document.querySelectorAll('.item').forEach((el) => {
+    el.onclick = () => selectSession(el.dataset.id);
+  });
+
+  if (current) {
+    const s = sessions.find((x) => x.sessionId === current);
+    if (s) fill(s);
+  }
+}
+
+function fill(s) {
+  current = s.sessionId;
+  $('title').textContent = s.label || s.sessionId;
+  $('status').textContent =
+    `${s.connected ? 'Conectado' : 'Estado'}: ${s.status || 'desconocido'} ${s.number ? '· ' + s.number : ''}`;
+
+  $('agentLabel').value = s.label || '';
+  $('prompt').value = s.prompt || '';
+  $('active').checked = s.active !== false;
+
+  $('saveBtn').disabled = false;
+  $('sendBtn').disabled = false;
+  $('restartBtn').disabled = false;
+  $('logoutBtn').disabled = false;
+
+  loadHistory();
+}
+
+function selectSession(id) {
+  const s = sessions.find((x) => x.sessionId === id);
+  if (s) fill(s);
+}
+
+async function loadHistory() {
+  if (!current) return;
+  const history = await api(`/api/agents/${encodeURIComponent(current)}/history?limit=60`);
+  $('log').innerHTML = history.length
+    ? history.map((m) => `
+      <div class="bubble ${m.direction === 'in' ? 'in' : 'out'}">
+        <small>${esc(m.name || m.from || m.to || '')} · ${new Date(m.at).toLocaleString()}</small><br>
+        ${esc(m.text || '')}
+      </div>
+    `).join('')
+    : 'Sin mensajes aún.';
+
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+async function getSession(sessionId) {
+  return api(`/api/agents/${encodeURIComponent(sessionId)}`);
+}
+
+async function pollQr(sessionId) {
+  $('qrBox').style.display = 'none';
+  setQrStatus('Esperando generación de QR...', 'warn');
+
+  const maxTries = 60;
+
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      const s = await getSession(sessionId);
+
+      if (s.lastError) {
+        setQrStatus(`Error de sesión: ${s.lastError}`, 'err');
+        return;
+      }
+
+      if (s.connected) {
+        $('qrBox').style.display = 'none';
+        setQrStatus('La sesión ya quedó conectada.', 'ok');
+        await loadSessions();
+        return;
+      }
+
+      if (s.qrDataUrl) {
+        $('qrImg').src = s.qrDataUrl;
+        $('qrBox').style.display = 'block';
+        setQrStatus('QR generado correctamente. Escanéalo con WhatsApp Business.', 'ok');
+        await loadSessions();
+        return;
+      }
+
+      const extra = s.loadingPercent != null
+        ? ` (${s.loadingPercent}% ${s.loadingMessage || ''})`
+        : '';
+      setQrStatus(`Esperando QR... Estado actual: ${s.status || 'desconocido'}${extra}`, 'warn');
+    } catch (e) {
+      setQrStatus(`Error consultando la sesión: ${e.message}`, 'err');
+    }
+
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+
+  setQrStatus('No llegó el QR a tiempo. Reinicia la sesión o revisa logs de Render.', 'err');
+}
+
+$('saveTokenBtn').onclick = async () => {
+  localStorage.setItem('APP_TOKEN', $('tokenInput').value.trim());
+  alert('Token guardado');
+};
+
+$('reloadBtn').onclick = () => loadSessions();
+
+$('createSessionBtn').onclick = async () => {
+  try {
+    const sessionId = $('newSessionId').value.trim();
+    if (!sessionId) {
+      alert('Escribe un ID de sesión');
+      return;
+    }
+
+    await api('/api/sessions', 'POST', {
+      sessionId,
+      label: $('newSessionLabel').value
+    });
+
+    setQrStatus('Sesión creada. Voy a consultar el QR...', 'warn');
+    await loadSessions();
+    await pollQr(sessionId);
+  } catch (e) {
+    setQrStatus(`Error al crear sesión: ${e.message}`, 'err');
+    alert(e.message);
+  }
+};
+
+$('saveBtn').onclick = async () => {
+  try {
+    await api(`/api/agents/${encodeURIComponent(current)}`, 'POST', {
+      sessionId: current,
+      label: $('agentLabel').value,
+      prompt: $('prompt').value,
+      active: $('active').checked
+    });
+    await loadSessions();
+    alert('Guardado');
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+$('sendBtn').onclick = async () => {
+  try {
+    await api('/api/send-message', 'POST', {
+      sessionId: current,
+      number: $('number').value,
+      message: $('message').value
+    });
+    $('message').value = '';
+    await loadHistory();
+    alert('Mensaje enviado');
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+$('restartBtn').onclick = async () => {
+  try {
+    await api(`/api/sessions/${encodeURIComponent(current)}/restart`, 'POST', {});
+    setQrStatus('Sesión reiniciada. Buscando QR...', 'warn');
+    await loadSessions();
+    await pollQr(current);
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+$('logoutBtn').onclick = async () => {
+  if (!confirm('Se cerrará la sesión de WhatsApp y habrá que escanear QR otra vez.')) return;
+
+  try {
+    await api(`/api/sessions/${encodeURIComponent(current)}/logout`, 'POST', {});
+    $('qrBox').style.display = 'none';
+    setQrStatus('Sesión cerrada.', 'warn');
+    await loadSessions();
+    alert('Sesión cerrada');
+  } catch (e) {
+    alert(e.message);
+  }
+};
+
+$('tokenInput').value = token();
+loadSessions().catch(() => {});
