@@ -1,222 +1,33 @@
-const token = prompt('Pega tu APP_TOKEN para administrar el bot');
-const apiHeaders = token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-
-const socket = io();
-let sessions = [];
-let currentSession = null;
-
-const $ = (id) => document.getElementById(id);
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      ...apiHeaders
-    }
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Error en API');
-  return data;
+body{margin:0;font-family:system-ui,sans-serif;background:#0b141a;color:#e9edef}
+.wrap{max-width:1320px;margin:auto;padding:24px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:340px 1fr;gap:20px}
+.card{background:#111b21;border:1px solid #2a3942;border-radius:18px;padding:18px;box-shadow:0 10px 24px rgba(0,0,0,.18)}
+h1,h2{margin:0 0 12px}
+.muted{color:#8aa0aa;font-size:14px}
+input,textarea,button{width:100%;box-sizing:border-box;border-radius:14px;border:1px solid #2a3942;background:#202c33;color:#fff;padding:12px;margin:6px 0 12px}
+button{background:#00a884;color:#061511;border:0;font-weight:700;cursor:pointer}
+button.alt{background:#21313a;color:#fff}
+button.danger{background:#3c1717;color:#ffd6d6}
+.list{display:grid;gap:10px}
+.item{padding:12px;border:1px solid #2a3942;border-radius:14px;background:#0d171d;cursor:pointer}
+.item.active{border-color:#00a884}
+.msglog{min-height:300px;max-height:560px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:78%;padding:10px 12px;border-radius:16px;white-space:pre-wrap}
+.in{align-self:flex-start;background:#202c33}
+.out{align-self:flex-end;background:#005c4b}
+.qr{display:none;background:#fff;color:#111;border-radius:14px;padding:14px;text-align:center}
+.qr img{max-width:240px;width:100%}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.actions{display:flex;gap:10px}
+.actions button{width:auto;min-width:150px}
+.statusbox{background:#0d171d;border:1px solid #2a3942;border-radius:14px;padding:12px;margin-top:12px;font-size:14px}
+.ok{color:#6ee7b7}
+.warn{color:#fbbf24}
+.err{color:#fca5a5}
+@media(max-width:980px){
+  .grid,.row{grid-template-columns:1fr}
+  .top{flex-direction:column;align-items:flex-start}
+  .actions{width:100%}
+  .actions button{flex:1}
 }
-
-function escapeHtml(text) {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function renderSessions() {
-  const list = $('sessionList');
-  if (!sessions.length) {
-    list.innerHTML = '<div class="muted">No hay sesiones todavía.</div>';
-    return;
-  }
-
-  list.innerHTML = sessions.map((s) => `
-    <div class="session-item ${currentSession === s.sessionId ? 'active' : ''}" data-id="${s.sessionId}">
-      <strong>${escapeHtml(s.label || s.sessionId)}</strong><br>
-      <small>${escapeHtml(s.number || s.sessionId)}</small><br>
-      <span class="badge ${s.connected ? 'online' : 'offline'}">${s.connected ? 'Conectado' : s.status || 'Desconectado'}</span>
-    </div>
-  `).join('');
-
-  document.querySelectorAll('.session-item').forEach((item) => {
-    item.addEventListener('click', () => selectSession(item.dataset.id));
-  });
-}
-
-function updateTopBar(session) {
-  $('currentTitle').textContent = session ? (session.label || session.sessionId) : 'Selecciona una sesión';
-  $('statusText').textContent = session ? `${session.connected ? 'Conectado' : 'Estado'}: ${session.status || 'desconocido'}${session.number ? ` · ${session.number}` : ''}` : 'Sin sesión activa';
-  $('btnSave').disabled = !session;
-  $('btnSend').disabled = !session;
-  $('btnRestart').disabled = !session;
-  $('btnLogout').disabled = !session;
-  $('btnLoadHistory').disabled = !session;
-}
-
-async function loadSessions() {
-  sessions = await api('/api/agents');
-  renderSessions();
-  if (currentSession) {
-    const session = sessions.find((s) => s.sessionId === currentSession);
-    if (session) fillAgentForm(session);
-  }
-}
-
-function fillAgentForm(session) {
-  currentSession = session.sessionId;
-  $('agentLabel').value = session.label || '';
-  $('promptEditor').value = session.prompt || '';
-  $('activeToggle').checked = session.active !== false;
-  updateTopBar(session);
-  renderSessions();
-  loadHistory();
-}
-
-function selectSession(sessionId) {
-  const session = sessions.find((s) => s.sessionId === sessionId);
-  if (session) fillAgentForm(session);
-}
-
-async function loadHistory() {
-  if (!currentSession) return;
-  const history = await api(`/api/agents/${encodeURIComponent(currentSession)}/history?limit=60`);
-  const log = $('messageLog');
-  if (!history.length) {
-    log.className = 'message-log empty';
-    log.textContent = 'No hay mensajes en esta sesión.';
-    return;
-  }
-  log.className = 'message-log';
-  log.innerHTML = history.map((m) => `
-    <div class="bubble ${m.direction === 'in' ? 'in' : 'out'}">
-      <span class="meta">${escapeHtml(m.name || m.from || m.to || '')} · ${new Date(m.at).toLocaleString()}</span>
-      ${escapeHtml(m.text || '')}
-    </div>
-  `).join('');
-  log.scrollTop = log.scrollHeight;
-}
-
-function showQr(dataUrl) {
-  $('qrImg').src = dataUrl;
-  $('qrBox').classList.remove('hidden');
-}
-
-function hideQr() {
-  $('qrBox').classList.add('hidden');
-  $('qrImg').removeAttribute('src');
-}
-
-$('btnCreate').addEventListener('click', async () => {
-  const sessionId = $('newSessionId').value.trim();
-  const label = $('newSessionLabel').value.trim();
-  if (!sessionId) return alert('Escribe un ID de sesión');
-  try {
-    await api('/api/sessions', {
-      method: 'POST',
-      body: JSON.stringify({ sessionId, label })
-    });
-    await loadSessions();
-    alert('Sesión creada. Espera el QR.');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('btnSave').addEventListener('click', async () => {
-  if (!currentSession) return;
-  try {
-    await api(`/api/agents/${encodeURIComponent(currentSession)}`, {
-      method: 'POST',
-      body: JSON.stringify({
-        label: $('agentLabel').value,
-        prompt: $('promptEditor').value,
-        active: $('activeToggle').checked
-      })
-    });
-    await loadSessions();
-    alert('Cambios guardados');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('btnSend').addEventListener('click', async () => {
-  if (!currentSession) return;
-  try {
-    await api('/api/send-message', {
-      method: 'POST',
-      body: JSON.stringify({
-        sessionId: currentSession,
-        number: $('manualNumber').value,
-        message: $('manualMessage').value
-      })
-    });
-    $('manualMessage').value = '';
-    await loadHistory();
-    alert('Mensaje enviado');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('btnRestart').addEventListener('click', async () => {
-  if (!currentSession) return;
-  try {
-    await api(`/api/sessions/${encodeURIComponent(currentSession)}/restart`, { method: 'POST' });
-    await loadSessions();
-    alert('Sesión reiniciada');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('btnLogout').addEventListener('click', async () => {
-  if (!currentSession) return;
-  if (!confirm('Esto desvincula la sesión y obliga a escanear QR de nuevo. ¿Continuar?')) return;
-  try {
-    await api(`/api/sessions/${encodeURIComponent(currentSession)}/logout`, { method: 'POST' });
-    await loadSessions();
-    hideQr();
-    alert('Sesión cerrada');
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('btnReload').addEventListener('click', loadSessions);
-$('btnLoadHistory').addEventListener('click', loadHistory);
-
-socket.on('qr', (data) => {
-  if (data.sessionId === $('newSessionId').value.trim() || data.sessionId === currentSession) {
-    showQr(data.qrDataUrl);
-  }
-  loadSessions().catch(() => {});
-});
-
-socket.on('session_ready', async ({ sessionId }) => {
-  hideQr();
-  await loadSessions();
-  if (!currentSession) selectSession(sessionId);
-});
-
-socket.on('session_disconnected', loadSessions);
-socket.on('session_error', loadSessions);
-socket.on('new_message', ({ sessionId }) => {
-  if (sessionId === currentSession) loadHistory().catch(() => {});
-});
-socket.on('bot_reply', ({ sessionId }) => {
-  if (sessionId === currentSession) loadHistory().catch(() => {});
-});
-socket.on('manual_message_sent', ({ sessionId }) => {
-  if (sessionId === currentSession) loadHistory().catch(() => {});
-});
-
-loadSessions().catch((error) => {
-  alert(`No se pudo cargar el panel: ${error.message}`);
-});
