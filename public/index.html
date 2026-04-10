@@ -3,92 +3,81 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WhatsApp GPT Platform</title>
+  <title>Panel Directo Render</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-badge">🤖</div>
-        <div>
-          <h1>WhatsApp GPT</h1>
-          <p>Multi sesión por QR</p>
-        </div>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Panel directo Render</h1>
+        <div class="muted">Ingresa tu APP_TOKEN para usar el panel directo</div>
       </div>
+      <button class="alt" id="reloadBtn">Actualizar</button>
+    </div>
 
-      <div class="panel">
-        <h2>Nueva sesión</h2>
-        <label>ID de sesión</label>
-        <input id="newSessionId" placeholder="ventas, soporte, recepcion" />
-        <label>Etiqueta</label>
-        <input id="newSessionLabel" placeholder="Ventas" />
-        <button id="btnCreate">Crear sesión</button>
-        <div id="qrBox" class="qr-box hidden">
-          <img id="qrImg" alt="QR de WhatsApp" />
-          <p>Escanea este QR con WhatsApp Business</p>
-        </div>
-      </div>
+    <div class="card">
+      <input id="tokenInput" placeholder="Pega aquí tu APP_TOKEN" />
+      <button id="saveTokenBtn">Guardar token</button>
+    </div>
 
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Sesiones</h2>
-          <button id="btnReload" class="secondary">Actualizar</button>
-        </div>
-        <div id="sessionList" class="session-list"></div>
-      </div>
-    </aside>
-
-    <main class="content">
-      <section class="panel topbar">
-        <div>
-          <h2 id="currentTitle">Selecciona una sesión</h2>
-          <p id="statusText">Sin sesión activa</p>
-        </div>
-        <div class="actions">
-          <button id="btnRestart" class="secondary" disabled>Reiniciar</button>
-          <button id="btnLogout" class="danger" disabled>Cerrar sesión</button>
-        </div>
-      </section>
-
-      <section class="grid">
-        <div class="panel">
-          <h2>Agente</h2>
-          <label>Etiqueta visible</label>
-          <input id="agentLabel" placeholder="Ventas" />
-          <label>Prompt</label>
-          <textarea id="promptEditor" rows="10" placeholder="Configura el comportamiento del bot"></textarea>
-          <div class="toggle-row">
-            <label class="switch">
-              <input type="checkbox" id="activeToggle" checked />
-              <span></span>
-            </label>
-            <span>Bot activo</span>
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>Nueva sesión</h2>
+          <input id="newSessionId" placeholder="ventas, soporte, recepcion" />
+          <input id="newSessionLabel" placeholder="Etiqueta visible" />
+          <button id="createSessionBtn">Crear sesión</button>
+          <div class="statusbox" id="qrStatus">Aún no se ha solicitado QR.</div>
+          <div class="qr" id="qrBox">
+            <img id="qrImg" alt="QR">
+            <div style="margin-top:10px;font-weight:600">Escanea este QR con WhatsApp Business</div>
           </div>
-          <button id="btnSave" disabled>Guardar cambios</button>
         </div>
 
-        <div class="panel">
-          <h2>Enviar mensaje manual</h2>
-          <label>Número</label>
-          <input id="manualNumber" placeholder="5215512345678" />
-          <label>Mensaje</label>
-          <textarea id="manualMessage" rows="5" placeholder="Escribe tu mensaje"></textarea>
-          <button id="btnSend" disabled>Enviar mensaje</button>
+        <div class="card">
+          <h2>Sesiones</h2>
+          <div class="list" id="sessionList"></div>
         </div>
-      </section>
+      </div>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Historial reciente</h2>
-          <button id="btnLoadHistory" class="secondary" disabled>Recargar historial</button>
+      <div>
+        <div class="card">
+          <div class="top" style="margin:0 0 16px">
+            <div>
+              <h2 id="title">Selecciona una sesión</h2>
+              <div class="muted" id="status">Sin sesión activa</div>
+            </div>
+            <div class="actions">
+              <button class="alt" id="restartBtn" disabled>Reiniciar</button>
+              <button class="danger" id="logoutBtn" disabled>Cerrar sesión</button>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <input id="agentLabel" placeholder="Etiqueta">
+              <textarea id="prompt" rows="10" placeholder="Prompt del agente"></textarea>
+              <label><input type="checkbox" id="active" checked style="width:auto;margin-right:8px">Bot activo</label>
+              <button id="saveBtn" disabled>Guardar cambios</button>
+            </div>
+
+            <div>
+              <input id="number" placeholder="5215512345678">
+              <textarea id="message" rows="6" placeholder="Mensaje manual"></textarea>
+              <button id="sendBtn" disabled>Enviar mensaje</button>
+            </div>
+          </div>
         </div>
-        <div id="messageLog" class="message-log empty">Aún no hay conversación cargada.</div>
-      </section>
-    </main>
+
+        <div class="card">
+          <h2>Historial</h2>
+          <div class="msglog" id="log">Sin historial.</div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
