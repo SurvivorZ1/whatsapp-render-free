@@ -22,14 +22,20 @@ const APP_TOKEN = process.env.APP_TOKEN || 'change-this-token';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const MONGODB_URI = process.env.MONGODB_URI || '';
-const BOT_DEFAULT_PROMPT = process.env.BOT_DEFAULT_PROMPT || 'Eres un asistente profesional de WhatsApp. Responde en español claro, breve y útil. Si te faltan datos, dilo con honestidad y ofrece seguimiento humano.';
+const BOT_DEFAULT_PROMPT =
+  process.env.BOT_DEFAULT_PROMPT ||
+  'Eres un asistente profesional de WhatsApp. Responde en español claro, breve y útil. Si te faltan datos, dilo con honestidad y ofrece seguimiento humano.';
 const REPLY_COOLDOWN_MS = Number(process.env.REPLY_COOLDOWN_MS || 6000);
 const IGNORE_GROUPS = String(process.env.IGNORE_GROUPS || 'true') === 'true';
 const IGNORE_STATUS = String(process.env.IGNORE_STATUS || 'true') === 'true';
 const HEADLESS = String(process.env.HEADLESS || 'true') !== 'false';
-const REMOTE_BACKUP_INTERVAL_MS = Math.max(Number(process.env.REMOTE_BACKUP_INTERVAL_MS || 300000), 60000);
+const REMOTE_BACKUP_INTERVAL_MS = Math.max(
+  Number(process.env.REMOTE_BACKUP_INTERVAL_MS || 300000),
+  60000
+);
 const TEMP_AUTH_DIR = path.resolve(process.env.TEMP_AUTH_DIR || './tmp-auth');
 const HISTORY_LIMIT = Math.max(Number(process.env.HISTORY_LIMIT || 250), 50);
+const INIT_TIMEOUT_MS = Math.max(Number(process.env.INIT_TIMEOUT_MS || 120000), 30000);
 
 const clients = new Map();
 const lastReplies = new Map();
@@ -61,14 +67,16 @@ const MessageLog = mongoose.model('MessageLog', messageSchema);
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 function nowIso() {
   return new Date().toISOString();
 }
 
 function sanitizeSessionId(input) {
-  return String(input || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-');
 }
 
 async function ensureDir(dir) {
@@ -79,8 +87,8 @@ function authMiddleware(req, res, next) {
   if (
     req.path === '/health' ||
     req.path === '/' ||
-    req.path === '/index.html' ||
     req.path === '/app' ||
+    req.path === '/index.html' ||
     req.path.startsWith('/socket.io') ||
     req.path.startsWith('/styles.css') ||
     req.path.startsWith('/app.js')
@@ -97,6 +105,7 @@ function authMiddleware(req, res, next) {
 }
 
 app.use(authMiddleware);
+app.use(express.static(path.join(__dirname, 'public')));
 
 function getRuntimeState(sessionId) {
   return clients.get(sessionId) || null;
@@ -133,6 +142,7 @@ async function updateAgent(sessionId, patch) {
     ...patch
   };
   delete set._id;
+
   return Agent.findOneAndUpdate(
     { sessionId: safeId },
     { $set: set, $setOnInsert: { createdAt: new Date() } },
@@ -142,12 +152,20 @@ async function updateAgent(sessionId, patch) {
 
 async function appendMessage(sessionId, item) {
   const safeId = sanitizeSessionId(sessionId);
-  await MessageLog.create({ sessionId: safeId, ...item, at: item.at ? new Date(item.at) : new Date() });
+  await MessageLog.create({
+    sessionId: safeId,
+    ...item,
+    at: item.at ? new Date(item.at) : new Date()
+  });
 
   const count = await MessageLog.countDocuments({ sessionId: safeId });
   if (count > HISTORY_LIMIT) {
     const extra = count - HISTORY_LIMIT;
-    const oldDocs = await MessageLog.find({ sessionId: safeId }).sort({ at: 1, _id: 1 }).limit(extra).select('_id');
+    const oldDocs = await MessageLog.find({ sessionId: safeId })
+      .sort({ at: 1, _id: 1 })
+      .limit(extra)
+      .select('_id');
+
     if (oldDocs.length) {
       await MessageLog.deleteMany({ _id: { $in: oldDocs.map((d) => d._id) } });
     }
@@ -156,13 +174,20 @@ async function appendMessage(sessionId, item) {
 
 async function getRecentMessages(sessionId, limit = 10) {
   const safeId = sanitizeSessionId(sessionId);
-  const docs = await MessageLog.find({ sessionId: safeId }).sort({ at: -1 }).limit(limit).lean();
+  const docs = await MessageLog.find({ sessionId: safeId })
+    .sort({ at: -1 })
+    .limit(limit)
+    .lean();
   return docs.reverse();
 }
 
 async function getHistory(sessionId, limit = 60) {
   const safeId = sanitizeSessionId(sessionId);
-  const docs = await MessageLog.find({ sessionId: safeId }).sort({ at: -1 }).limit(Math.min(limit, HISTORY_LIMIT)).lean();
+  const docs = await MessageLog.find({ sessionId: safeId })
+    .sort({ at: -1 })
+    .limit(Math.min(limit, HISTORY_LIMIT))
+    .lean();
+
   return docs.reverse().map((doc) => ({
     ...doc,
     at: new Date(doc.at).toISOString()
@@ -172,6 +197,7 @@ async function getHistory(sessionId, limit = 60) {
 async function createClientSummary(sessionId) {
   const agent = await getOrCreateAgent(sessionId);
   const state = getRuntimeState(sessionId);
+
   return {
     sessionId: agent.sessionId,
     label: agent.label || agent.sessionId,
@@ -182,6 +208,8 @@ async function createClientSummary(sessionId) {
     hasQr: Boolean(state?.qrDataUrl),
     status: state?.status || (agent.connected ? 'ready' : 'idle'),
     lastError: state?.lastError || null,
+    loadingPercent: state?.loadingPercent ?? null,
+    loadingMessage: state?.loadingMessage ?? null,
     updatedAt: agent.updatedAt ? new Date(agent.updatedAt).toISOString() : null,
     qrDataUrl: state?.qrDataUrl || null
   };
@@ -198,6 +226,7 @@ function buildPuppeteerOptions() {
   ];
 
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+
   return {
     headless: HEADLESS,
     args,
@@ -220,13 +249,15 @@ async function askOpenAI({ systemPrompt, userMessage, contactName, sessionId }) 
     history ? `Historial reciente:\n${history}` : '',
     `Mensaje actual del cliente: ${userMessage}`,
     'Responde listo para enviar por WhatsApp. No uses markdown ni listas innecesarias. Si falta contexto, dilo con honestidad.'
-  ].filter(Boolean).join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${OPENAI_API_KEY}`
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
@@ -237,6 +268,7 @@ async function askOpenAI({ systemPrompt, userMessage, contactName, sessionId }) 
   });
 
   const data = await response.json();
+
   if (!response.ok) {
     throw new Error(data?.error?.message || 'Error consultando OpenAI');
   }
@@ -312,6 +344,7 @@ async function handleIncomingMessage(sessionId, message) {
     });
 
     await message.reply(reply);
+
     await appendMessage(sessionId, {
       direction: 'out',
       to: message.from,
@@ -327,7 +360,9 @@ async function handleIncomingMessage(sessionId, message) {
       at: nowIso()
     });
   } catch (error) {
-    const fallback = 'Tuvimos un problema técnico momentáneo. En breve un asesor puede darte seguimiento.';
+    const fallback =
+      'Tuvimos un problema técnico momentáneo. En breve un asesor puede darte seguimiento.';
+
     await appendMessage(sessionId, {
       direction: 'out',
       to: message.from,
@@ -357,20 +392,36 @@ async function initSession(sessionId) {
   if (!safeId) throw new Error('sessionId inválido');
 
   const existing = clients.get(safeId);
-  if (existing?.initializing || existing?.ready || existing?.client) {
+
+  if (existing?.ready) {
     return createClientSummary(safeId);
+  }
+
+  if (existing?.initializing) {
+    const elapsed = Date.now() - (existing.startedAt || 0);
+    if (elapsed < INIT_TIMEOUT_MS) {
+      return createClientSummary(safeId);
+    }
+    try {
+      await existing.client?.destroy();
+    } catch {}
+    clients.delete(safeId);
   }
 
   await getOrCreateAgent(safeId);
 
   const state = {
-    status: 'initializing',
+    status: 'launching_browser',
     ready: false,
     qrDataUrl: null,
     lastError: null,
     initializing: true,
-    client: null
+    startedAt: Date.now(),
+    client: null,
+    loadingPercent: null,
+    loadingMessage: null
   };
+
   clients.set(safeId, state);
 
   const client = new Client({
@@ -381,30 +432,76 @@ async function initSession(sessionId) {
       dataPath: TEMP_AUTH_DIR
     }),
     takeoverOnConflict: 0,
+    qrMaxRetries: 4,
     puppeteer: buildPuppeteerOptions()
   });
 
   state.client = client;
 
-  client.on('qr', async (qr) => {
-    state.status = 'awaiting_qr';
-    state.qrDataUrl = await QRCode.toDataURL(qr);
-    io.emit('qr', { sessionId: safeId, qrDataUrl: state.qrDataUrl });
+  const setState = async (status, extra = {}) => {
+    Object.assign(state, { status, ...extra });
+    io.emit('session_status', {
+      sessionId: safeId,
+      status: state.status,
+      lastError: state.lastError || null,
+      loadingPercent: state.loadingPercent ?? null,
+      loadingMessage: state.loadingMessage ?? null,
+      hasQr: Boolean(state.qrDataUrl),
+      connected: Boolean(state.ready)
+    });
+  };
+
+  const initTimer = setTimeout(async () => {
+    if (!state.ready && !state.qrDataUrl) {
+      state.initializing = false;
+      state.status = 'timeout';
+      state.lastError = 'WhatsApp Web tardó demasiado en iniciar y no generó QR.';
+      io.emit('session_error', {
+        sessionId: safeId,
+        error: state.lastError
+      });
+      try {
+        await client.destroy();
+      } catch {}
+    }
+  }, INIT_TIMEOUT_MS);
+
+  client.on('loading_screen', async (percent, message) => {
+    state.loadingPercent = percent;
+    state.loadingMessage = message;
+    await setState('loading_screen');
   });
 
-  client.on('authenticated', () => {
+  client.on('qr', async (qr) => {
+    clearTimeout(initTimer);
+    state.initializing = false;
+    state.status = 'awaiting_qr';
+    state.lastError = null;
+    state.qrDataUrl = await QRCode.toDataURL(qr);
+    io.emit('qr', { sessionId: safeId, qrDataUrl: state.qrDataUrl });
+    await setState('awaiting_qr');
+  });
+
+  client.on('authenticated', async () => {
+    state.initializing = false;
     state.status = 'authenticated';
     state.lastError = null;
+    await setState('authenticated');
   });
 
   client.on('auth_failure', async (msg) => {
+    clearTimeout(initTimer);
+    state.initializing = false;
+    state.ready = false;
     state.status = 'auth_failure';
     state.lastError = msg || 'Fallo de autenticación';
     await updateAgent(safeId, { connected: false });
     io.emit('session_error', { sessionId: safeId, error: state.lastError });
+    await setState('auth_failure');
   });
 
   client.on('ready', async () => {
+    clearTimeout(initTimer);
     state.ready = true;
     state.initializing = false;
     state.status = 'ready';
@@ -421,6 +518,8 @@ async function initSession(sessionId) {
       sessionId: safeId,
       number: info?.wid?.user || null
     });
+
+    await setState('ready');
   });
 
   client.on('remote_session_saved', () => {
@@ -428,15 +527,19 @@ async function initSession(sessionId) {
   });
 
   client.on('disconnected', async (reason) => {
+    clearTimeout(initTimer);
     state.ready = false;
     state.initializing = false;
     state.status = 'disconnected';
     state.lastError = String(reason || 'Sesión desconectada');
+
     await updateAgent(safeId, { connected: false });
     io.emit('session_disconnected', {
       sessionId: safeId,
       reason: state.lastError
     });
+
+    await setState('disconnected');
   });
 
   client.on('message', (message) => {
@@ -445,14 +548,19 @@ async function initSession(sessionId) {
     });
   });
 
-  try {
-    await client.initialize();
-  } catch (error) {
+  client.initialize().catch(async (error) => {
+    clearTimeout(initTimer);
     state.initializing = false;
+    state.ready = false;
     state.status = 'error';
-    state.lastError = error.message;
-    throw error;
-  }
+    state.lastError = error.message || 'Error inicializando WhatsApp';
+    await updateAgent(safeId, { connected: false });
+    io.emit('session_error', {
+      sessionId: safeId,
+      error: state.lastError
+    });
+    await setState('error');
+  });
 
   return createClientSummary(safeId);
 }
@@ -462,11 +570,16 @@ async function logoutSession(sessionId) {
   const state = clients.get(safeId);
 
   if (state?.client) {
-    try { await state.client.logout(); } catch {}
-    try { await state.client.destroy(); } catch {}
+    try {
+      await state.client.logout();
+    } catch {}
+    try {
+      await state.client.destroy();
+    } catch {}
   }
 
   clients.delete(safeId);
+
   if (mongoStore) {
     try {
       await mongoStore.delete({ session: `RemoteAuth-${safeId}` });
@@ -480,6 +593,7 @@ async function logoutSession(sessionId) {
 async function sendManualMessage(sessionId, number, text) {
   const safeId = sanitizeSessionId(sessionId);
   const state = clients.get(safeId);
+
   if (!state?.client || !state.ready) {
     throw new Error('La sesión no está conectada');
   }
@@ -492,6 +606,7 @@ async function sendManualMessage(sessionId, number, text) {
   if (!body) throw new Error('Mensaje vacío');
 
   await state.client.sendMessage(chatId, body);
+
   await appendMessage(safeId, {
     direction: 'out',
     to: normalized,
@@ -506,6 +621,10 @@ async function sendManualMessage(sessionId, number, text) {
     at: nowIso()
   });
 }
+
+app.get('/', (req, res) => {
+  res.redirect('/app');
+});
 
 app.get('/health', async (req, res) => {
   res.json({
@@ -523,8 +642,12 @@ app.get('/api/agents', async (req, res) => {
     const docs = await Agent.find({}).sort({ sessionId: 1 }).lean();
     const runtimeOnly = [...clients.keys()].filter((id) => !docs.find((d) => d.sessionId === id));
     const allIds = [...docs.map((d) => d.sessionId), ...runtimeOnly];
+
     const summaries = [];
-    for (const sessionId of allIds) summaries.push(await createClientSummary(sessionId));
+    for (const sessionId of allIds) {
+      summaries.push(await createClientSummary(sessionId));
+    }
+
     res.json(summaries);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -552,15 +675,18 @@ app.get('/api/agents/:sessionId/history', async (req, res) => {
 app.post('/api/sessions', async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.body.sessionId);
-    if (!sessionId) return res.status(400).json({ error: 'sessionId requerido' });
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId requerido' });
+    }
 
     const patch = {};
     if (typeof req.body.label !== 'undefined') patch.label = String(req.body.label || sessionId).trim();
     if (typeof req.body.prompt !== 'undefined') patch.prompt = String(req.body.prompt || BOT_DEFAULT_PROMPT);
     if (typeof req.body.active !== 'undefined') patch.active = Boolean(req.body.active);
-    await updateAgent(sessionId, patch);
 
+    await updateAgent(sessionId, patch);
     const summary = await initSession(sessionId);
+
     res.json({ success: true, session: summary });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -571,6 +697,7 @@ app.post('/api/agents/:sessionId', async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.sessionId);
     const patch = {};
+
     if (typeof req.body.label !== 'undefined') patch.label = String(req.body.label || sessionId).trim();
     if (typeof req.body.prompt !== 'undefined') patch.prompt = String(req.body.prompt || BOT_DEFAULT_PROMPT);
     if (typeof req.body.active !== 'undefined') patch.active = Boolean(req.body.active);
@@ -586,10 +713,14 @@ app.post('/api/sessions/:sessionId/restart', async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.sessionId);
     const state = clients.get(sessionId);
+
     if (state?.client) {
-      try { await state.client.destroy(); } catch {}
+      try {
+        await state.client.destroy();
+      } catch {}
       clients.delete(sessionId);
     }
+
     const summary = await initSession(sessionId);
     res.json({ success: true, session: summary });
   } catch (error) {
@@ -609,9 +740,11 @@ app.post('/api/sessions/:sessionId/logout', async (req, res) => {
 app.post('/api/send-message', async (req, res) => {
   try {
     const { sessionId, number, message } = req.body;
+
     if (!sessionId || !number || !message) {
       return res.status(400).json({ error: 'sessionId, number y message son requeridos' });
     }
+
     await sendManualMessage(sessionId, number, message);
     res.json({ success: true });
   } catch (error) {
@@ -625,14 +758,17 @@ app.get('/app', (req, res) => {
 
 async function bootstrap() {
   if (!MONGODB_URI) {
-    throw new Error('Falta MONGODB_URI. Para Render free necesitas MongoDB Atlas para guardar sesiones y configuración.');
+    throw new Error(
+      'Falta MONGODB_URI. Para Render free necesitas MongoDB Atlas para guardar sesiones y configuración.'
+    );
   }
 
   await ensureDir(TEMP_AUTH_DIR);
   await mongoose.connect(MONGODB_URI);
   mongoStore = new MongoStore({ mongoose });
 
-  const storedAgents = await Agent.find({}).select('sessionId').lean();
+  const storedAgents = await Agent.find({ connected: true }).select('sessionId').lean();
+
   for (const agent of storedAgents) {
     initSession(agent.sessionId).catch((error) => {
       console.error(`No se pudo restaurar la sesión ${agent.sessionId}:`, error.message);
